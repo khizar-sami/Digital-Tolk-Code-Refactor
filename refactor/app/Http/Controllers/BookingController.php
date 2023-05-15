@@ -27,6 +27,7 @@ class BookingController extends Controller
     public function __construct(BookingRepository $bookingRepository)
     {
         $this->repository = $bookingRepository;
+        //inserting a test comment
     }
 
     /**
@@ -35,17 +36,10 @@ class BookingController extends Controller
      */
     public function index(Request $request)
     {
-        if($user_id = $request->get('user_id')) {
-
-            $response = $this->repository->getUsersJobs($user_id);
-
+        if($request->__authenticatedUser->user_type == env('ADMIN_ROLE_ID') || $request->__authenticatedUser->user_type == env('SUPERADMIN_ROLE_ID')){
+            return response($this->repository->getAll($request)); // If the condition is true the request will return from here, and the code will not traverse more.
         }
-        elseif($request->__authenticatedUser->user_type == env('ADMIN_ROLE_ID') || $request->__authenticatedUser->user_type == env('SUPERADMIN_ROLE_ID'))
-        {
-            $response = $this->repository->getAll($request);
-        }
-
-        return response($response);
+        return response($this->repository->getUsersJobs($request->get('user_id')));
     }
 
     /**
@@ -54,9 +48,8 @@ class BookingController extends Controller
      */
     public function show($id)
     {
-        $job = $this->repository->with('translatorJobRel.user')->find($id);
-
-        return response($job);
+        //Returning response directly, Assignment of variables takes memory which is not neccassary here. 
+        return response($this->repository->with('translatorJobRel.user')->find($id));
     }
 
     /**
@@ -65,11 +58,7 @@ class BookingController extends Controller
      */
     public function store(Request $request)
     {
-        $data = $request->all();
-
-        $response = $this->repository->store($request->__authenticatedUser, $data);
-
-        return response($response);
+        return response($this->repository->store($request->all()));
 
     }
 

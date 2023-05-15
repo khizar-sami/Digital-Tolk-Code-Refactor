@@ -58,18 +58,29 @@ class BookingRepository extends BaseRepository
     public function getUsersJobs($user_id)
     {
         $cuser = User::find($user_id);
+        if(!$cuser){
+            return null;
+        }
+        
         $usertype = '';
         $emergencyJobs = array();
         $noramlJobs = array();
-        if ($cuser && $cuser->is('customer')) {
-            $jobs = $cuser->jobs()->with('user.userMeta', 'user.average', 'translatorJobRel.user.average', 'language', 'feedback')->whereIn('status', ['pending', 'assigned', 'started'])->orderBy('due', 'asc')->get();
+        $jobs = null;
+        if ($cuser->is('customer')) {
+            $jobs = $cuser->jobs()
+                ->with('user.userMeta', 'user.average', 'translatorJobRel.user.average', 'language', 'feedback')
+                ->whereIn('status', ['pending', 'assigned', 'started'])
+                ->orderBy('due', 'asc')
+                ->get();
             $usertype = 'customer';
-        } elseif ($cuser && $cuser->is('translator')) {
-            $jobs = Job::getTranslatorJobs($cuser->id, 'new');
-            $jobs = $jobs->pluck('jobs')->all();
+
+        } elseif ($cuser->is('translator')) {
+            $jobs = Job::getTranslatorJobs($cuser->id, 'new')
+                ->pluck('jobs')
+                ->all();
             $usertype = 'translator';
         }
-        if ($jobs) {
+        if ($jobs->count() > 0) {
             foreach ($jobs as $jobitem) {
                 if ($jobitem->immediate == 'yes') {
                     $emergencyJobs[] = $jobitem;
@@ -98,26 +109,29 @@ class BookingRepository extends BaseRepository
             $pagenum = "1";
         }
         $cuser = User::find($user_id);
+        if(!$cuser){
+            return null;
+        }
+
         $usertype = '';
         $emergencyJobs = array();
         $noramlJobs = array();
-        if ($cuser && $cuser->is('customer')) {
+        if ($cuser->is('customer')) {
             $jobs = $cuser->jobs()->with('user.userMeta', 'user.average', 'translatorJobRel.user.average', 'language', 'feedback', 'distance')->whereIn('status', ['completed', 'withdrawbefore24', 'withdrawafter24', 'timedout'])->orderBy('due', 'desc')->paginate(15);
             $usertype = 'customer';
             return ['emergencyJobs' => $emergencyJobs, 'noramlJobs' => [], 'jobs' => $jobs, 'cuser' => $cuser, 'usertype' => $usertype, 'numpages' => 0, 'pagenum' => 0];
-        } elseif ($cuser && $cuser->is('translator')) {
-            $jobs_ids = Job::getTranslatorJobsHistoric($cuser->id, 'historic', $pagenum);
-            $totaljobs = $jobs_ids->total();
-            $numpages = ceil($totaljobs / 15);
-
-            $usertype = 'translator';
-
-            $jobs = $jobs_ids;
-            $noramlJobs = $jobs_ids;
-//            $jobs['data'] = $noramlJobs;
-//            $jobs['total'] = $totaljobs;
-            return ['emergencyJobs' => $emergencyJobs, 'noramlJobs' => $noramlJobs, 'jobs' => $jobs, 'cuser' => $cuser, 'usertype' => $usertype, 'numpages' => $numpages, 'pagenum' => $pagenum];
         }
+        $jobs_ids = Job::getTranslatorJobsHistoric($cuser->id, 'historic', $pagenum);
+        $totaljobs = $jobs_ids->total();
+        $numpages = ceil($totaljobs / 15);
+
+        $usertype = 'translator';
+
+        $jobs = $jobs_ids;
+        $noramlJobs = $jobs_ids;
+
+        return ['emergencyJobs' => $emergencyJobs, 'noramlJobs' => $noramlJobs, 'jobs' => $jobs, 'cuser' => $cuser, 'usertype' => $usertype, 'numpages' => $numpages, 'pagenum' => $pagenum];
+        
     }
 
     /**
@@ -125,156 +139,132 @@ class BookingRepository extends BaseRepository
      * @param $data
      * @return mixed
      */
-    public function store($user, $data)
+    public function store($data)
     {
-
+        $user = $data->__authenticatedUser;
         $immediatetime = 5;
         $consumer_type = $user->userMeta->consumer_type;
-        if ($user->user_type == env('CUSTOMER_ROLE_ID')) {
-            $cuser = $user;
-
-            if (!isset($data['from_language_id'])) {
-                $response['status'] = 'fail';
-                $response['message'] = "Du måste fylla in alla fält";
-                $response['field_name'] = "from_language_id";
-                return $response;
-            }
-            if ($data['immediate'] == 'no') {
-                if (isset($data['due_date']) && $data['due_date'] == '') {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste fylla in alla fält";
-                    $response['field_name'] = "due_date";
-                    return $response;
-                }
-                if (isset($data['due_time']) && $data['due_time'] == '') {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste fylla in alla fält";
-                    $response['field_name'] = "due_time";
-                    return $response;
-                }
-                if (!isset($data['customer_phone_type']) && !isset($data['customer_physical_type'])) {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste göra ett val här";
-                    $response['field_name'] = "customer_phone_type";
-                    return $response;
-                }
-                if (isset($data['duration']) && $data['duration'] == '') {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste fylla in alla fält";
-                    $response['field_name'] = "duration";
-                    return $response;
-                }
-            } else {
-                if (isset($data['duration']) && $data['duration'] == '') {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste fylla in alla fält";
-                    $response['field_name'] = "duration";
-                    return $response;
-                }
-            }
-            if (isset($data['customer_phone_type'])) {
-                $data['customer_phone_type'] = 'yes';
-            } else {
-                $data['customer_phone_type'] = 'no';
-            }
-
-            if (isset($data['customer_physical_type'])) {
-                $data['customer_physical_type'] = 'yes';
-                $response['customer_physical_type'] = 'yes';
-            } else {
-                $data['customer_physical_type'] = 'no';
-                $response['customer_physical_type'] = 'no';
-            }
-
-            if ($data['immediate'] == 'yes') {
-                $due_carbon = Carbon::now()->addMinute($immediatetime);
-                $data['due'] = $due_carbon->format('Y-m-d H:i:s');
-                $data['immediate'] = 'yes';
-                $data['customer_phone_type'] = 'yes';
-                $response['type'] = 'immediate';
-
-            } else {
-                $due = $data['due_date'] . " " . $data['due_time'];
-                $response['type'] = 'regular';
-                $due_carbon = Carbon::createFromFormat('m/d/Y H:i', $due);
-                $data['due'] = $due_carbon->format('Y-m-d H:i:s');
-                if ($due_carbon->isPast()) {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Can't create booking in past";
-                    return $response;
-                }
-            }
-            if (in_array('male', $data['job_for'])) {
-                $data['gender'] = 'male';
-            } else if (in_array('female', $data['job_for'])) {
-                $data['gender'] = 'female';
-            }
-            if (in_array('normal', $data['job_for'])) {
-                $data['certified'] = 'normal';
-            }
-            else if (in_array('certified', $data['job_for'])) {
-                $data['certified'] = 'yes';
-            } else if (in_array('certified_in_law', $data['job_for'])) {
-                $data['certified'] = 'law';
-            } else if (in_array('certified_in_helth', $data['job_for'])) {
-                $data['certified'] = 'health';
-            }
-            if (in_array('normal', $data['job_for']) && in_array('certified', $data['job_for'])) {
-                $data['certified'] = 'both';
-            }
-            else if(in_array('normal', $data['job_for']) && in_array('certified_in_law', $data['job_for']))
-            {
-                $data['certified'] = 'n_law';
-            }
-            else if(in_array('normal', $data['job_for']) && in_array('certified_in_helth', $data['job_for']))
-            {
-                $data['certified'] = 'n_health';
-            }
-            if ($consumer_type == 'rwsconsumer')
-                $data['job_type'] = 'rws';
-            else if ($consumer_type == 'ngo')
-                $data['job_type'] = 'unpaid';
-            else if ($consumer_type == 'paid')
-                $data['job_type'] = 'paid';
-            $data['b_created_at'] = date('Y-m-d H:i:s');
-            if (isset($due))
-                $data['will_expire_at'] = TeHelper::willExpireAt($due, $data['b_created_at']);
-            $data['by_admin'] = isset($data['by_admin']) ? $data['by_admin'] : 'no';
-
-            $job = $cuser->jobs()->create($data);
-
-            $response['status'] = 'success';
-            $response['id'] = $job->id;
-            $data['job_for'] = array();
-            if ($job->gender != null) {
-                if ($job->gender == 'male') {
-                    $data['job_for'][] = 'Man';
-                } else if ($job->gender == 'female') {
-                    $data['job_for'][] = 'Kvinna';
-                }
-            }
-            if ($job->certified != null) {
-                if ($job->certified == 'both') {
-                    $data['job_for'][] = 'normal';
-                    $data['job_for'][] = 'certified';
-                } else if ($job->certified == 'yes') {
-                    $data['job_for'][] = 'certified';
-                } else {
-                    $data['job_for'][] = $job->certified;
-                }
-            }
-
-            $data['customer_town'] = $cuser->userMeta->city;
-            $data['customer_type'] = $cuser->userMeta->customer_type;
-
-            //Event::fire(new JobWasCreated($job, $data, '*'));
-
-//            $this->sendNotificationToSuitableTranslators($job->id, $data, '*');// send Push for New job posting
-        } else {
+        
+        if($user->user_type != env('CUSTOMER_ROLE_ID')){
             $response['status'] = 'fail';
             $response['message'] = "Translator can not create booking";
+            return $response;
+        }
+        // Here we are using Laravel Validations to check the request inputs rather than checking on if else conditions.
+        $validator = Validator::make($data, [
+            'from_language_id'          => ['required'],
+            'duration'                  => ['required'],
+            'due_date'                  => ['required_if:immediate,==,no'],
+            'due_time'                  => ['required_if:immediate,==,no'],
+            'customer_phone_type'       => ['required_if:immediate,==,no'],
+            'customer_physical_type'    => ['required_if:immediate,==,no'],
+            'job_for'                   => ['required', 'array']
+        ]);
+
+        //Here we are checking if any validations fails and returning the response with error messages and filed names.
+        if ($validator->fails()) {
+            $response['status'] = 'fail';
+            $response['message'] = $error = $validator->errors()->first();
+            $response['field_name'] = $validator->errors()->keys();
+            return $response;
+        }
+        
+        $data['customer_phone_type'] = 'no';
+        $data['customer_physical_type'] = 'no';
+        $response['customer_physical_type'] = 'no';
+        
+        if (isset($data['customer_phone_type'])) {
+            $data['customer_phone_type'] = 'yes';
+        }
+        
+        if (isset($data['customer_physical_type'])) {
+            $data['customer_physical_type'] = 'yes';
+            $response['customer_physical_type'] = 'yes';
+        }
+        
+        $due = $data['due_date'] . " " . $data['due_time'];
+        $response['type'] = 'regular';
+        $due_carbon = Carbon::createFromFormat('m/d/Y H:i', $due);
+        $data['due'] = $due_carbon->format('Y-m-d H:i:s');
+        if ($due_carbon->isPast()) {
+            $response['status'] = 'fail';
+            $response['message'] = "Can't create booking in past";
+            return $response;
+        }
+        
+        if ($data['immediate'] == 'yes') {
+            $due_carbon = Carbon::now()->addMinute($immediatetime);
+            $data['due'] = $due_carbon->format('Y-m-d H:i:s');
+            $data['immediate'] = 'yes';
+            $data['customer_phone_type'] = 'yes';
+            $response['type'] = 'immediate';
+        }
+        $data['gender'] = 'female';
+        if (in_array('male', $data['job_for'])) {
+            $data['gender'] = 'male';
         }
 
+        //Here creating an array for possible inputs in data['job_for'] and iterating the array to get the desired key value
+        $certification = [
+            'normal'                        => 'normal',
+            'certified'                     => 'yes',
+            'certified_in_law'              => 'law',
+            'certified_in_health'           => 'health',
+            'normalcertified'               => 'both',
+            'normalcertified_in_law'        => 'n_law',
+            'normalcertified_in_health'     => 'n_health'
+        ];
+        $keyToTake = '';
+        foreach($certification as $key => $value){
+            if(in_array($key, $data['job_for']) ){
+                $keyToTake = $keyToTake.$key;
+            }
+        }
+        $data['certified'] = (in_array($keyToTake,$certification)?$certification[$keyToTake]:'n/a');
+        
+        $consumerTypes  = [
+            'rwsconsumer'   => 'rws',
+            'ngo'           => 'unpaid',
+            'paid'          => 'paid'
+        ];
+        
+        $data['job_type'] = $consumerTypes[$consumer_type]; 
+        
+        $data['b_created_at'] = date('Y-m-d H:i:s');
+        if (isset($due))
+            $data['will_expire_at'] = TeHelper::willExpireAt($due, $data['b_created_at']);
+        $data['by_admin'] = isset($data['by_admin']) ? $data['by_admin'] : 'no';
+        
+        $job = $user->jobs()->create($data);
+        
+        $response['status'] = 'success';
+        $response['id'] = $job->id;
+        // Not usable code
+        // $data['job_for'] = array();
+        // if ($job->gender != null) {
+        //     if ($job->gender == 'male') {
+        //         $data['job_for'][] = 'Man';
+        //     } else if ($job->gender == 'female') {
+        //         $data['job_for'][] = 'Kvinna';
+        //     }
+        // }
+        // if ($job->certified != null) {
+        //     if ($job->certified == 'both') {
+        //         $data['job_for'][] = 'normal';
+        //         $data['job_for'][] = 'certified';
+        //     } else if ($job->certified == 'yes') {
+        //         $data['job_for'][] = 'certified';
+        //     } else {
+        //         $data['job_for'][] = $job->certified;
+        //     }
+        // }
+        
+        // $data['customer_town'] = $user->userMeta->city;
+        // $data['customer_type'] = $user->userMeta->customer_type;
+        
+        //Event::fire(new JobWasCreated($job, $data, '*'));
+
+//            $this->sendNotificationToSuitableTranslators($job->id, $data, '*');// send Push for New job posting
         return $response;
 
     }
@@ -740,16 +730,11 @@ class BookingRepository extends BaseRepository
      */
     public function updateJob($id, $data, $cuser)
     {
-        $job = Job::find($id);
-
-        $current_translator = $job->translatorJobRel->where('cancel_at', Null)->first();
-        if (is_null($current_translator))
-            $current_translator = $job->translatorJobRel->where('completed_at', '!=', Null)->first();
-
+        $job = Job::findOrFail($id); // Here added Find or Fail method of laravel eloquent so that if the job does not exist it will return null(404)
+        //Here Adding orwhere to remove if condition, 
+        $current_translator = $job->translatorJobRel->where('cancel_at', Null)->orwhere('completed_at' , '!=', NULL)->first();
         $log_data = [];
-
         $langChanged = false;
-
         $changeTranslator = $this->changeTranslator($current_translator, $data, $job);
         if ($changeTranslator['translatorChanged']) $log_data[] = $changeTranslator['log_data'];
 
@@ -783,12 +768,13 @@ class BookingRepository extends BaseRepository
         if ($job->due <= Carbon::now()) {
             $job->save();
             return ['Updated'];
-        } else {
-            $job->save();
-            if ($changeDue['dateChanged']) $this->sendChangedDateNotification($job, $old_time);
-            if ($changeTranslator['translatorChanged']) $this->sendChangedTranslatorNotification($job, $current_translator, $changeTranslator['new_translator']);
-            if ($langChanged) $this->sendChangedLangNotification($job, $old_lang);
         }
+        //Else Removed because there is no need of that, the request will return if condition above returns true
+        $job->save();
+        if ($changeDue['dateChanged']) $this->sendChangedDateNotification($job, $old_time);
+        if ($changeTranslator['translatorChanged']) $this->sendChangedTranslatorNotification($job, $current_translator, $changeTranslator['new_translator']);
+        if ($langChanged) $this->sendChangedLangNotification($job, $old_lang);
+        
     }
 
     /**
@@ -1109,37 +1095,48 @@ class BookingRepository extends BaseRepository
     private function changeTranslator($current_translator, $data, $job)
     {
         $translatorChanged = false;
-
-        if (!is_null($current_translator) || (isset($data['translator']) && $data['translator'] != 0) || $data['translator_email'] != '') {
-            $log_data = [];
-            if (!is_null($current_translator) && ((isset($data['translator']) && $current_translator->user_id != $data['translator']) || $data['translator_email'] != '') && (isset($data['translator']) && $data['translator'] != 0)) {
-                if ($data['translator_email'] != '') $data['translator'] = User::where('email', $data['translator_email'])->first()->id;
-                $new_translator = $current_translator->toArray();
-                $new_translator['user_id'] = $data['translator'];
-                unset($new_translator['id']);
-                $new_translator = Translator::create($new_translator);
-                $current_translator->cancel_at = Carbon::now();
-                $current_translator->save();
-                $log_data[] = [
-                    'old_translator' => $current_translator->user->email,
-                    'new_translator' => $new_translator->user->email
-                ];
-                $translatorChanged = true;
-            } elseif (is_null($current_translator) && isset($data['translator']) && ($data['translator'] != 0 || $data['translator_email'] != '')) {
-                if ($data['translator_email'] != '') $data['translator'] = User::where('email', $data['translator_email'])->first()->id;
-                $new_translator = Translator::create(['user_id' => $data['translator'], 'job_id' => $job->id]);
-                $log_data[] = [
-                    'old_translator' => null,
-                    'new_translator' => $new_translator->user->email
-                ];
-                $translatorChanged = true;
-            }
-            if ($translatorChanged)
-                return ['translatorChanged' => $translatorChanged, 'new_translator' => $new_translator, 'log_data' => $log_data];
-
+        $logData = [];
+    
+        // Determine the translator ID based on the provided data
+        $translatorId = !empty($data['translator_email']) ? User::where('email', $data['translator_email'])->first()->id : $data['translator'];
+    
+        // Check if there is a current translator and if the translator needs to be changed
+        if (!empty($currentTranslator) && ($currentTranslator->user_id != $data['translator'] || !empty($data['translator_email']))) {
+            $newTranslatorData = $currentTranslator->toArray();
+            $newTranslatorData['user_id'] = $translatorId;
+            unset($newTranslatorData['id']);
+    
+            // Create a new translator with updated information
+            $newTranslator = Translator::create($newTranslatorData);
+    
+            // Set the cancellation date for the current translator
+            $currentTranslator->cancel_at = Carbon::now();
+            $currentTranslator->save();
+    
+            $logData[] = [
+                'old_translator' => $currentTranslator->user->email,
+                'new_translator' => $newTranslator->user->email
+            ];
+    
+            $translatorChanged = true;
         }
-
-        return ['translatorChanged' => $translatorChanged];
+        // Check if there is no current translator and a new translator needs to be assigned
+        elseif (empty($currentTranslator) && !empty($data['translator'])) {
+            // Create a new translator with the provided translator ID
+            $newTranslator = Translator::create(['user_id' => $translatorId, 'job_id' => $job->id]);
+    
+            $logData[] = [
+                'old_translator' => null,
+                'new_translator' => $newTranslator->user->email
+            ];
+    
+            $translatorChanged = true;
+        }
+    
+        // Return the result along with the log data
+        return $translatorChanged
+            ? ['translatorChanged' => $translatorChanged, 'new_translator' => $newTranslator, 'log_data' => $logData]
+            : ['translatorChanged' => $translatorChanged];
     }
 
     /**
@@ -1680,200 +1677,141 @@ class BookingRepository extends BaseRepository
         return $response;
     }
 
-    public function getAll(Request $request, $limit = null)
+    public function getAll(Request $request, $limit = null) // Created functions to enable re usablity in the code, and minimize code complexity.
     {
         $requestdata = $request->all();
         $cuser = $request->__authenticatedUser;
         $consumer_type = $cuser->consumer_type;
+        $allJobs = Job::query();
+        $filterAndOrderColumnForFilterTimetype = ((!(empty($requestdata['filter_timetype'])) && $requestdata['filter_timetype']) == "due")?'due':'created_at';
+        if(!$cuser){
+            return null;
+        }
+        if ($cuser->user_type == env('SUPERADMIN_ROLE_ID')) {
+            $allJobs = $this->applySuperAdminFiltersForJob($allJobs, $request); // Applying Filters only for super admin.
 
-        if ($cuser && $cuser->user_type == env('SUPERADMIN_ROLE_ID')) {
-            $allJobs = Job::query();
+        } else {
+            $allJobs->where('job_type', ($consumer_type=='RWS')?'rws':'unpaid');
+        }
+        $allJobs = applyBasicFilters($filterColumnForFilterTimetype,$allJobs,$request); // Applying all basic filters
+        if (isset($requestdata['count']) && $requestdata['count'] == 'true') 
+            return ['count' => $allJobs->count()];
+            
+        $allJobs->orderBy($filterColumnForFilterTimetype, 'desc');
+        $allJobs->with('user', 'language', 'feedback.user', 'translatorJobRel.user', 'distance');
+        if (!empty($limit) && is_int($limit)) // The data will be paginated provided by the limit
+            return $allJobs = $allJobs->paginate($limit);
+        return $allJobs->get(); // If the limits is null or set to 'all' all the data from the table will be fetched 
+    }
 
-            if (isset($requestdata['feedback']) && $requestdata['feedback'] != 'false') {
-                $allJobs->where('ignore_feedback', '0');
-                $allJobs->whereHas('feedback', function ($q) {
-                    $q->where('rating', '<=', '3');
-                });
-                if (isset($requestdata['count']) && $requestdata['count'] != 'false') return ['count' => $allJobs->count()];
+    public function applySuperAdminFiltersForJob($allJobs, $request){
+        if (isset($requestdata['expired_at']) && $requestdata['expired_at'] != '') {
+            $allJobs->where('expired_at', '>=', $requestdata['expired_at']);
+        }
+        if (isset($requestdata['will_expire_at']) && $requestdata['will_expire_at'] != '') {
+            $allJobs->where('will_expire_at', '>=', $requestdata['will_expire_at']);
+        }
+        
+        if (isset($requestdata['translator_email']) && count($requestdata['translator_email'])) {
+            $users = DB::table('users')->whereIn('email', $requestdata['translator_email'])->get();
+            if ($users) {
+                $allJobIDs = DB::table('translator_job_rel')->whereNull('cancel_at')->whereIn('user_id', collect($users)->pluck('id')->all())->lists('job_id');
+                $allJobs->whereIn('id', $allJobIDs);
             }
+        }
+        
+        if (isset($requestdata['physical'])) {
+            $allJobs->where('customer_physical_type', $requestdata['physical'])
+                    ->where('ignore_physical', 0);
+        }
 
-            if (isset($requestdata['id']) && $requestdata['id'] != '') {
-                if (is_array($requestdata['id']))
-                    $allJobs->whereIn('id', $requestdata['id']);
-                else
-                    $allJobs->where('id', $requestdata['id']);
-                $requestdata = array_only($requestdata, ['id']);
-            }
+        if (isset($requestdata['phone'])) {
+            $allJobs->where('customer_phone_type', $requestdata['phone']);
+            if(isset($requestdata['physical']))
+            $allJobs->where('ignore_physical_phone', 0);
+        }
 
-            if (isset($requestdata['lang']) && $requestdata['lang'] != '') {
-                $allJobs->whereIn('from_language_id', $requestdata['lang']);
-            }
-            if (isset($requestdata['status']) && $requestdata['status'] != '') {
-                $allJobs->whereIn('status', $requestdata['status']);
-            }
-            if (isset($requestdata['expired_at']) && $requestdata['expired_at'] != '') {
-                $allJobs->where('expired_at', '>=', $requestdata['expired_at']);
-            }
-            if (isset($requestdata['will_expire_at']) && $requestdata['will_expire_at'] != '') {
-                $allJobs->where('will_expire_at', '>=', $requestdata['will_expire_at']);
-            }
-            if (isset($requestdata['customer_email']) && count($requestdata['customer_email']) && $requestdata['customer_email'] != '') {
+        if (isset($requestdata['flagged'])) {
+            $allJobs->where('flagged', $requestdata['flagged'])
+                    ->where('ignore_flagged', 0);
+
+        }
+
+        if (isset($requestdata['distance']) && $requestdata['distance'] == 'empty') {
+            $allJobs->whereDoesntHave('distance');
+        }
+
+        if(isset($requestdata['salary']) &&  $requestdata['salary'] == 'yes') {
+            $allJobs->whereDoesntHave('user.salaries');
+        }
+
+        if (isset($requestdata['consumer_type']) && $requestdata['consumer_type'] != '') {
+            $allJobs->whereHas('user.userMeta', function($q) use ($requestdata) {
+                $q->where('consumer_type', $requestdata['consumer_type']);
+            });
+        }
+
+        if (isset($requestdata['booking_type'])) {
+            $allJobs->where(($requestdata['booking_type'] == 'physical')?'customer_physical_type':'customer_phone_type', 'yes');
+        }
+
+        if (isset($requestdata['job_type']) && $requestdata['job_type'] != '') {
+            $allJobs->whereIn('job_type', $requestdata['job_type']);
+        }
+
+        return $allJobs;
+    }
+
+    public function applyBasicFilters($filterColumnForFilterTimetype,$allJobs, $request){
+        if (isset($requestdata['id']) && $requestdata['id'] != '') {
+            if (is_array($requestdata['id']))
+                $allJobs->whereIn('id', $requestdata['id']);
+            else
+                $allJobs->where('id', $requestdata['id']);
+            $requestdata = array_only($requestdata, ['id']);
+        }
+        
+        if (isset($requestdata['feedback']) && $requestdata['feedback'] == 'true') {
+            $allJobs->where('ignore_feedback', '0');
+            $allJobs->whereHas('feedback', function ($q) {
+                $q->where('rating', '<=', '3');
+            });
+        }
+        if (isset($requestdata['lang']) && $requestdata['lang'] != '') {
+            $allJobs->whereIn('from_language_id', $requestdata['lang']);
+        }
+        if (isset($requestdata['status']) && $requestdata['status'] != '') {
+            $allJobs->whereIn('status', $requestdata['status']);
+        }
+
+        if (isset($requestdata['customer_email']) && $requestdata['customer_email'] != '') {
+            if(is_array($requestdata['customer_email']) && count($requestdata['customer_email'])){
                 $users = DB::table('users')->whereIn('email', $requestdata['customer_email'])->get();
                 if ($users) {
                     $allJobs->whereIn('user_id', collect($users)->pluck('id')->all());
                 }
-            }
-            if (isset($requestdata['translator_email']) && count($requestdata['translator_email'])) {
-                $users = DB::table('users')->whereIn('email', $requestdata['translator_email'])->get();
-                if ($users) {
-                    $allJobIDs = DB::table('translator_job_rel')->whereNull('cancel_at')->whereIn('user_id', collect($users)->pluck('id')->all())->lists('job_id');
-                    $allJobs->whereIn('id', $allJobIDs);
-                }
-            }
-            if (isset($requestdata['filter_timetype']) && $requestdata['filter_timetype'] == "created") {
-                if (isset($requestdata['from']) && $requestdata['from'] != "") {
-                    $allJobs->where('created_at', '>=', $requestdata["from"]);
-                }
-                if (isset($requestdata['to']) && $requestdata['to'] != "") {
-                    $to = $requestdata["to"] . " 23:59:00";
-                    $allJobs->where('created_at', '<=', $to);
-                }
-                $allJobs->orderBy('created_at', 'desc');
-            }
-            if (isset($requestdata['filter_timetype']) && $requestdata['filter_timetype'] == "due") {
-                if (isset($requestdata['from']) && $requestdata['from'] != "") {
-                    $allJobs->where('due', '>=', $requestdata["from"]);
-                }
-                if (isset($requestdata['to']) && $requestdata['to'] != "") {
-                    $to = $requestdata["to"] . " 23:59:00";
-                    $allJobs->where('due', '<=', $to);
-                }
-                $allJobs->orderBy('due', 'desc');
-            }
-
-            if (isset($requestdata['job_type']) && $requestdata['job_type'] != '') {
-                $allJobs->whereIn('job_type', $requestdata['job_type']);
-                /*$allJobs->where('jobs.job_type', '=', $requestdata['job_type']);*/
-            }
-
-            if (isset($requestdata['physical'])) {
-                $allJobs->where('customer_physical_type', $requestdata['physical']);
-                $allJobs->where('ignore_physical', 0);
-            }
-
-            if (isset($requestdata['phone'])) {
-                $allJobs->where('customer_phone_type', $requestdata['phone']);
-                if(isset($requestdata['physical']))
-                $allJobs->where('ignore_physical_phone', 0);
-            }
-
-            if (isset($requestdata['flagged'])) {
-                $allJobs->where('flagged', $requestdata['flagged']);
-                $allJobs->where('ignore_flagged', 0);
-            }
-
-            if (isset($requestdata['distance']) && $requestdata['distance'] == 'empty') {
-                $allJobs->whereDoesntHave('distance');
-            }
-
-            if(isset($requestdata['salary']) &&  $requestdata['salary'] == 'yes') {
-                $allJobs->whereDoesntHave('user.salaries');
-            }
-
-            if (isset($requestdata['count']) && $requestdata['count'] == 'true') {
-                $allJobs = $allJobs->count();
-
-                return ['count' => $allJobs];
-            }
-
-            if (isset($requestdata['consumer_type']) && $requestdata['consumer_type'] != '') {
-                $allJobs->whereHas('user.userMeta', function($q) use ($requestdata) {
-                    $q->where('consumer_type', $requestdata['consumer_type']);
-                });
-            }
-
-            if (isset($requestdata['booking_type'])) {
-                if ($requestdata['booking_type'] == 'physical')
-                    $allJobs->where('customer_physical_type', 'yes');
-                if ($requestdata['booking_type'] == 'phone')
-                    $allJobs->where('customer_phone_type', 'yes');
-            }
-            
-            $allJobs->orderBy('created_at', 'desc');
-            $allJobs->with('user', 'language', 'feedback.user', 'translatorJobRel.user', 'distance');
-            if ($limit == 'all')
-                $allJobs = $allJobs->get();
-            else
-                $allJobs = $allJobs->paginate(15);
-
-        } else {
-
-            $allJobs = Job::query();
-
-            if (isset($requestdata['id']) && $requestdata['id'] != '') {
-                $allJobs->where('id', $requestdata['id']);
-                $requestdata = array_only($requestdata, ['id']);
-            }
-
-            if ($consumer_type == 'RWS') {
-                $allJobs->where('job_type', '=', 'rws');
-            } else {
-                $allJobs->where('job_type', '=', 'unpaid');
-            }
-            if (isset($requestdata['feedback']) && $requestdata['feedback'] != 'false') {
-                $allJobs->where('ignore_feedback', '0');
-                $allJobs->whereHas('feedback', function($q) {
-                    $q->where('rating', '<=', '3');
-                });
-                if(isset($requestdata['count']) && $requestdata['count'] != 'false') return ['count' => $allJobs->count()];
-            }
-            
-            if (isset($requestdata['lang']) && $requestdata['lang'] != '') {
-                $allJobs->whereIn('from_language_id', $requestdata['lang']);
-            }
-            if (isset($requestdata['status']) && $requestdata['status'] != '') {
-                $allJobs->whereIn('status', $requestdata['status']);
-            }
-            if (isset($requestdata['job_type']) && $requestdata['job_type'] != '') {
-                $allJobs->whereIn('job_type', $requestdata['job_type']);
-            }
-            if (isset($requestdata['customer_email']) && $requestdata['customer_email'] != '') {
+            }else{
                 $user = DB::table('users')->where('email', $requestdata['customer_email'])->first();
                 if ($user) {
                     $allJobs->where('user_id', '=', $user->id);
                 }
             }
-            if (isset($requestdata['filter_timetype']) && $requestdata['filter_timetype'] == "created") {
-                if (isset($requestdata['from']) && $requestdata['from'] != "") {
-                    $allJobs->where('created_at', '>=', $requestdata["from"]);
-                }
-                if (isset($requestdata['to']) && $requestdata['to'] != "") {
-                    $to = $requestdata["to"] . " 23:59:00";
-                    $allJobs->where('created_at', '<=', $to);
-                }
-                $allJobs->orderBy('created_at', 'desc');
-            }
-            if (isset($requestdata['filter_timetype']) && $requestdata['filter_timetype'] == "due") {
-                if (isset($requestdata['from']) && $requestdata['from'] != "") {
-                    $allJobs->where('due', '>=', $requestdata["from"]);
-                }
-                if (isset($requestdata['to']) && $requestdata['to'] != "") {
-                    $to = $requestdata["to"] . " 23:59:00";
-                    $allJobs->where('due', '<=', $to);
-                }
-                $allJobs->orderBy('due', 'desc');
-            }
+        }
 
-            $allJobs->orderBy('created_at', 'desc');
-            $allJobs->with('user', 'language', 'feedback.user', 'translatorJobRel.user', 'distance');
-            if ($limit == 'all')
-                $allJobs = $allJobs->get();
-            else
-                $allJobs = $allJobs->paginate(15);
 
+        if (isset($requestdata['filter_timetype'])) {
+        
+            if (isset($requestdata['from']) && $requestdata['from'] != "") {
+                $allJobs->where($filterColumnForFilterTimetype, '>=', $requestdata["from"]);
+            }
+            if (isset($requestdata['to']) && $requestdata['to'] != "") {
+                $to = Carbon::createFromFormat('Y-m-d', $requestdata['to']);
+                $allJobs->where($filterColumnForFilterTimetype, '<=', $to);
+            }
         }
         return $allJobs;
     }
+
 
     public function alerts()
     {
